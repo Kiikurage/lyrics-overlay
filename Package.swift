@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LyricsOverlay",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS("14.2")],
     targets: [
         .executableTarget(
             name: "LyricsOverlay",

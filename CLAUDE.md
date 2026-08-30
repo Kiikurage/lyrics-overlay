@@ -57,6 +57,7 @@ main.swift              AppDelegate、メニューバー常駐(LSUIElement)
 
 ```bash
 ./build-app.sh          # release ビルド + .app 組み立て + ad-hoc 署名
+./build-app.sh --run    # 上記に加えて、起動中のアプリを終了して開き直す
 open LyricsOverlay.app
 swift build             # 開発中の型チェックだけならこれで十分
 ```
@@ -66,6 +67,13 @@ swift build             # 開発中の型チェックだけならこれで十分
   ターミナルに紐づいてしまい、挙動が不安定になる。この手順を省かない
 - Swift 6 ツールチェインだが `swiftLanguageMode(.v5)` を指定している。
   strict concurrency に付き合うコストが PoC に見合わないため
+- **ソースを変更したら、依頼されなくても最後に `./build-app.sh` まで走らせること。**
+  `swift build` で型チェックが通っただけでは `.app` は古いままで、ユーザーが
+  `open LyricsOverlay.app` しても変更が反映されない。「ビルドしてください」と
+  ユーザーに促すのではなく、こちらで `.app` の更新まで済ませて完了とする。
+  **開発中は `./build-app.sh --run` を使い、アプリの再起動まで自動で行うこと。**
+  ユーザーは目視で確認したいので、変更のたびに手で終了・再起動させない
+  (バンドル ID は変わらないので、再起動しても TCC の許可は取り直しにならない)
 
 ## 動作確認の状況
 

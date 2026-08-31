@@ -24,8 +24,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>      <string>local.lyrics-overlay</string>
     <key>CFBundleExecutable</key>      <string>LyricsOverlay</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>0.5.1</string>
-    <key>CFBundleVersion</key>         <string>6</string>
+    <key>CFBundleShortVersionString</key> <string>0.5.2</string>
+    <key>CFBundleVersion</key>         <string>7</string>
     <key>LSMinimumSystemVersion</key>  <string>14.2</string>
     <!-- Dock とメニューバーに出さない、常駐アクセサリアプリ -->
     <key>LSUIElement</key>             <true/>

@@ -34,7 +34,7 @@ enum UpdateChecker {
             case .signature:
                 return "ダウンロードしたアプリの署名が、いま動いているものと一致しません。"
             case .notWritable:
-                return "アプリのある場所に書き込めません。手動で置き換えてください。"
+                return "認証されなかったため、更新を中止しました。"
             }
         }
     }
@@ -115,9 +115,9 @@ enum UpdateChecker {
     private static func install(_ release: Release) async {
         do {
             let staged = try await download(release)
-            let script = try prepare(replacementFrom: staged)
+            let plan = try prepare(replacementFrom: staged)
             // ここから先は戻れない。スクリプトを起こしてから自分を終わらせる。
-            try run(script)
+            try run(plan)
             NSApp.terminate(nil)
         } catch {
             present(
@@ -178,17 +178,46 @@ enum UpdateChecker {
             .map(String.init)
     }
 
+    private struct Replacement {
+        let script: URL
+        /// 管理者の認証が要るか(/Applications など、そのままでは書けない場所)。
+        let needsAuthorization: Bool
+    }
+
     /// 差し替えを行うスクリプトを用意する。
-    private static func prepare(replacementFrom staged: URL) throws -> URL {
+    private static func prepare(replacementFrom staged: URL) throws -> Replacement {
         let destination = Bundle.main.bundleURL
         let parent = destination.deletingLastPathComponent()
-        guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            throw Failure.notWritable
+
+        // 権限ビットを見るだけでは実態と食い違うことがある(ACL、読み取り専用の
+        // マウント、隔離された場所からの起動など)。実際に書いてみて確かめる。
+        var needsAuthorization = false
+        let probe = parent.appendingPathComponent(".lyrics-overlay-write-test")
+        do {
+            try Data().write(to: probe)
+            try? FileManager.default.removeItem(at: probe)
+        } catch {
+            // /Applications のような場所。管理者の認証を求めて置き換える。
+            log("そのままでは書けない: \(parent.path) — \(error.localizedDescription)")
+            needsAuthorization = true
         }
 
-        let script = staged.deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("replace.sh")
+        let work = staged.deletingLastPathComponent().deletingLastPathComponent()
+        let script = work.appendingPathComponent("replace.sh")
+
+        // 認証つきで動かす場合、スクリプトは root として走る。そのまま置くと
+        // アプリの持ち主が root になり、開き直すときも root で起動してしまう。
+        // 持ち主を戻し、ログイン中のユーザーとして開き直す。
+        let user = NSUserName()
+        let uid = getuid()
+        let restore = needsAuthorization
+            ? """
+              /usr/sbin/chown -R \(uid) '\(destination.path)'
+              /bin/launchctl asuser \(uid) /usr/bin/sudo -u \(user) \
+                  /usr/bin/open '\(destination.path)'
+              """
+            : "/usr/bin/open '\(destination.path)'"
+
         // 自分が終わるのを待ってから入れ替える。起動中のバンドルは置き換えられない。
         let body = """
             #!/bin/sh
@@ -198,20 +227,42 @@ enum UpdateChecker {
             done
             rm -rf '\(destination.path)'
             /usr/bin/ditto '\(staged.path)' '\(destination.path)'
-            /usr/bin/open '\(destination.path)'
-            rm -rf '\(script.deletingLastPathComponent().path)'
+            \(restore)
+            rm -rf '\(work.path)'
             """
         try body.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return script
+        return Replacement(script: script, needsAuthorization: needsAuthorization)
     }
 
-    private static func run(_ script: URL) throws {
+    private static func log(_ message: String) {
+        FileHandle.standardError.write("UpdateChecker: \(message)\n".data(using: .utf8)!)
+    }
+
+    private static func run(_ plan: Replacement) throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = [script.path]
+        if plan.needsAuthorization {
+            // 認証のダイアログは osascript に出してもらう。
+            // スクリプトは終了を待ってから動くので、ここで完了を待つと
+            // 互いに待ち合って進まなくなる。背景へ回して即座に戻す。
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = [
+                "-e",
+                "do shell script \"nohup /bin/sh '\(plan.script.path)' "
+                    + ">/dev/null 2>&1 &\" with administrator privileges",
+            ]
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = [plan.script.path]
+        }
         try process.run()
+
+        // 認証を断られたら更新は始まらない。その場合は終了しない。
+        if plan.needsAuthorization {
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw Failure.notWritable }
+        }
     }
 
     @discardableResult

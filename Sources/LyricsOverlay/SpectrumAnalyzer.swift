@@ -135,6 +135,35 @@ final class SpectrumAnalyzer {
     private static let hitFractionLow: Double = 0.1
     private static let hitFractionHigh: Double = 0.45
 
+    /// Spotify 内の音量(0〜100)。これを打ち消して、音量設定に依存しないようにする。
+    ///
+    /// プロセスタップが拾うのは、Spotify がアプリ内の音量を適用した後の信号。
+    /// 自動ゲインで後追いすると、曲の頭やブレイクで基準がずれて破綻するが、
+    /// 音量そのものが分かるなら、その場で正確に打ち消せる。
+    var volume: Double = 100
+
+    /// 揃える先の音量。この音量で再生したときの見た目に、他の音量を合わせる。
+    private static let volumeReference = 50.0
+    /// 音量スライダーと実際の振幅の関係(振幅 ∝ 音量^curve)。
+    ///
+    /// スライダーは線形ではない。音量を変えながら最大バンドの値を測ったところ、
+    /// 100 → 49 で -9.9dB、100 → 24 で -20.8dB だった(線形なら -6.0 / -12.4dB)。
+    /// どちらからも指数はおよそ 2.6 になるが、実際に見ると大音量側がまだ
+    /// 大きかったので、見た目に合わせて 3.0 にしている。
+    /// 平均ではなく最大バンドで測るのは、弱いバンドが下限に張り付いて
+    /// 平均を余分に下げるため。
+    private static let volumeCurve = 3.0
+    /// 持ち上げの上限(dB)。音量を絞りきったときに雑音まで増幅しないように。
+    private static let volumeCeiling = 20.0
+
+    /// 音量ぶんの補正(dB)。基準より大きければ下げ、小さければ持ち上げる。
+
+    private var volumeCompensation: Double {
+        let compensation = 20 * Self.volumeCurve * log10(Self.volumeReference / max(volume, 1))
+        return min(compensation, Self.volumeCeiling)
+    }
+
+
     /// 高域の持ち上げ(dB / オクターブ)。
     ///
     /// 自然な音のスペクトルは高域へ向かって概ね一定の傾きで下がる
@@ -297,7 +326,8 @@ final class SpectrumAnalyzer {
             // 振幅 → dB。おおよそ -60dB〜0dB を 0〜1 に写す。
             // 自然な音は高域ほどエネルギーが小さい(ピンクノイズ的な傾き)ので、
             // そのまま描くと右半分が死ぬ。帯域の位置に応じて持ち上げる。
-            let decibels = 20 * log10(Double(sum) / Double(Self.size) + 1e-9) + tilts[band]
+            let decibels = 20 * log10(Double(sum) / Double(Self.size) + 1e-9)
+                + tilts[band] + volumeCompensation
             let normalized = min(max((decibels + 60) / 60, 0), 1)
 
             // 帯域ごとに、最近のピークを基準にした倍率を掛ける。

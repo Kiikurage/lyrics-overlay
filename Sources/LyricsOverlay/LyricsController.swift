@@ -187,6 +187,7 @@ final class LyricsController {
 
         // Spotify を後から起動した場合はここで繋がる。
         startAudioTap()
+        audioTap?.setVolume(state.volume)
         duration = state.duration
         sync.update(position: state.position, isPlaying: state.isPlaying)
     }

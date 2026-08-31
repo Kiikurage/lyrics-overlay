@@ -13,6 +13,8 @@ struct PlaybackState: Equatable {
     let isPlaying: Bool
     /// アルバムカバーの URL(Spotify の CDN)。
     let artworkURL: String
+    /// Spotify 内の音量(0〜100)。音声解析の補正に使う。
+    let volume: Double
 }
 
 /// Spotify.app を AppleScript でポーリングし、再生状態の変化を通知する。
@@ -32,7 +34,8 @@ final class SpotifyMonitor {
             set t to current track
             return (id of t) & "\\t" & (name of t) & "\\t" & (artist of t) & "\\t" \
                 & (album of t) & "\\t" & (duration of t) & "\\t" & (player position) & "\\t" \
-                & (player state as text) & "\\t" & (artwork url of t)
+                & (player state as text) & "\\t" & (artwork url of t) & "\\t" \
+                & (sound volume)
         on error
             return "NOTRUNNING"
         end try
@@ -74,7 +77,7 @@ final class SpotifyMonitor {
         guard let raw = result.stringValue, raw != "NOTRUNNING" else { return nil }
 
         let f = raw.components(separatedBy: "\t")
-        guard f.count >= 8,
+        guard f.count >= 9,
               let durationMs = Double(f[4]),
               let position = Double(f[5]) else { return nil }
 
@@ -86,7 +89,8 @@ final class SpotifyMonitor {
             duration: durationMs / 1000.0,
             position: position,
             isPlaying: f[6] == "playing",
-            artworkURL: f[7]
+            artworkURL: f[7],
+            volume: Double(f[8]) ?? 100
         )
     }
 }

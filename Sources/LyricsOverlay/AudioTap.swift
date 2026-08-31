@@ -37,6 +37,11 @@ final class AudioTap {
 
     deinit { stop() }
 
+    /// Spotify 内の音量(0〜100)を伝える。解析でこのぶんを打ち消す。
+    func setVolume(_ volume: Double) {
+        queue.async { [analyzer] in analyzer.volume = volume }
+    }
+
     /// 曲が変わったときに、テンポの推定をやり直す。
     func resetTempo() {
         queue.async { [analyzer] in analyzer.resetTempo() }

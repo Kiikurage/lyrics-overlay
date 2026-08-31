@@ -36,8 +36,21 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# TCC の許可をバンドル単位で安定して記憶させるため ad-hoc 署名する。
-codesign --force --sign - "$APP"
+# 署名する。
+#
+# 自己署名証明書があればそれを使う。ad-hoc 署名にはアプリを識別する情報が無く、
+# macOS はバイナリのハッシュで判別するので、再ビルドのたびに別のアプリと
+# みなされて許可を取り直すことになる。証明書があれば「バンドル ID + 証明書」で
+# 判定されるため、中身が変わっても許可が維持される。
+# 証明書は scripts/create-signing-cert.sh で作る(Gatekeeper の警告は消えない)。
+IDENTITY="LyricsOverlay Dev"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    codesign --force --options runtime --sign "$IDENTITY" "$APP"
+    echo "signed with: $IDENTITY"
+else
+    codesign --force --sign - "$APP"
+    echo "signed with: ad-hoc (再ビルドのたびに許可を求められます)"
+fi
 
 echo "built: $PWD/$APP"
 

@@ -37,6 +37,16 @@ xattr -dr com.apple.quarantine /path/to/LyricsOverlay.app
 Notarization requires a paid Apple Developer Program membership, which this build does not use.
 If you build the app yourself it is never quarantined, so none of this applies.
 
+## Updating
+
+**Check for Updates…** in the menu bar downloads the latest release, verifies it, replaces the
+app and opens it again.
+
+The downloaded app has to be signed by the same certificate as the one already running, so that
+a tampered artifact cannot be installed. That has one consequence worth knowing: **if the signing
+certificate is ever replaced, updating across that change fails and has to be done by hand once.**
+The same applies when moving from an ad-hoc signed build (v0.2 and earlier) to a signed one.
+
 ## Build
 
 ```bash
@@ -47,6 +57,12 @@ open LyricsOverlay.app
 
 The app is bundled and signed so that macOS remembers its permissions per bundle rather than
 per binary. `swift build` is enough if you only want to type-check while developing.
+
+`./scripts/create-signing-cert.sh` creates a self-signed certificate and `build-app.sh` uses it
+when present, falling back to an ad-hoc signature otherwise. Ad-hoc signatures carry no identity,
+so macOS treats every rebuild as a different app and asks for the permissions again; a
+certificate makes them stick. It does nothing for Gatekeeper — that needs notarization, which
+needs a paid Apple Developer Program membership.
 
 ## Permissions
 

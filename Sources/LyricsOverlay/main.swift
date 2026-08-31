@@ -56,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             title: "設定…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(
+            title: "更新を確認…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "終了", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -70,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func openSettings() {
         settings.show()
+    }
+
+    @objc private func checkForUpdates() {
+        Task { await UpdateChecker.check() }
     }
 
     @objc private func quit() {

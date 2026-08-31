@@ -147,6 +147,8 @@ final class OverlayPanel: NSPanel {
             size.width = max(size.width, headerWidth)
             size.height += headerHeight + OverlayView.spacing
         }
+
+
         // 波は固定幅。ウィンドウがそれより狭いと切れるので、下限として効かせる。
         if !spectrum.levels.isEmpty {
             size.width = max(size.width, SpectrumWave.width)
@@ -162,6 +164,8 @@ final class OverlayPanel: NSPanel {
 
         // 波は歌詞より背が高い。ウィンドウの上下にその場所を確保する。
         // 文字の位置を動かしたくないので、余白はウィンドウの外側へ足す。
+        // 波は歌詞より下に大きく広がる。そのぶんをウィンドウの外側に足す。
+        // 文字の位置は変えたくないので、上端の基準は上側の余白ぶん補正する。
         let top = spectrum.levels.isEmpty ? 0 : OverlayView.waveMarginTop
         let bottom = spectrum.levels.isEmpty ? 0 : OverlayView.waveMarginBottom
         let outerHeight = height + top + bottom
@@ -188,10 +192,12 @@ final class OverlayPanel: NSPanel {
     }
 
     private func measure(_ text: String, size: Double?, within width: CGFloat) -> NSSize {
-        OverlayView.usesCoreText
+        // 歌詞(サイズ指定なし)は沈み込むぶんの余地も含めて測る。
+        let slack = size == nil ? OverlayView.lyricSlack : 0
+        return OverlayView.usesCoreText
             ? GlyphText.size(
-                of: text, style: style, size: size,
-                maxLines: 2, maxWidth: width.isFinite ? width : .greatestFiniteMagnitude)
+                of: text, style: style, size: size, maxLines: 2,
+                maxWidth: width.isFinite ? width : .greatestFiniteMagnitude, slack: slack)
             : style.measure(text, size: size, within: width)
     }
 
@@ -237,20 +243,20 @@ private struct OverlayView: View {
     /// 文字の描画を Core Text で自前に行うか。
     /// false にすると NSTextField を使う従来の経路に戻る(比較用)。
     static let usesCoreText = true
+    /// 波は歌詞より下に置く。その中心をどれだけ下げるか。
+    static let waveOffset: Double = 24
+    /// 波が上下へ広がるための余白。下へずらすぶん、下側を多く取る。
+    static let waveMarginTop: Double = 20
+    static let waveMarginBottom: Double = 92
+    /// 歌詞が沈み込むぶん、下側に確保しておく高さ。
+    /// ここが無いと、消えていく文字が描画の枠で切り取られる。
+    static let lyricSlack: Double = 16
+    /// 拍の検出状況を表示するか(確認用)。true に戻せばまた出る。
+    static let debugBeat = false
     /// 曲名・アーティストの文字サイズ。歌詞より控えめに、設定には追従させない。
     static let infoSize: Double = 13
     /// 曲情報と歌詞の間隔。
     static let spacing: Double = 4
-    /// 波は歌詞より下に置く。その中心をどれだけ下げるか。
-    /// 振幅が大きいときは歌詞に届く程度に留める。
-    static let waveOffset: Double = 24
-    /// 波が上下へ広がるための余白。下へずらすぶん、下側を多く取る。
-    ///
-    /// 波が振り切れたときの高さぶんは取らない。現実の曲でそこまで振れることは
-    /// まずなく、常時その余白があるとウィンドウが無駄に大きくなるため。
-    /// まれに振り切れたときは上下が切れるが、そのぶんを許容している。
-    static let waveMarginTop: Double = 20
-    static let waveMarginBottom: Double = 92
     /// アルバムカバーと文字の間隔。
     static let artGap: Double = 8
     /// タイトル行と時間行の間隔。ひとまとまりに見せたいので詰める。
@@ -296,11 +302,11 @@ private struct OverlayView: View {
         .frame(maxWidth: .infinity, alignment: style.alignment.frameAlignment)
         .padding(.horizontal, 28)
         .padding(.vertical, 16)
-        // 波がはみ出すぶんの場所。文字の位置は変わらない。
-        .padding(.top, OverlayView.waveMarginTop)
-        .padding(.bottom, OverlayView.waveMarginBottom)
         // 歌詞の行数が変わっても上端から積む。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // 波が上下へはみ出すぶんの場所。文字の位置は変わらない。
+        .padding(.top, OverlayView.waveMarginTop)
+        .padding(.bottom, OverlayView.waveMarginBottom)
         // 音に同期した光。背景なのでウィンドウの大きさには影響しない。
     }
 
@@ -320,11 +326,20 @@ private struct OverlayView: View {
         }
     }
 
+    /// 曲名と時間。その背後に波を敷く。
     private var infoColumn: some View {
         VStack(alignment: style.alignment.horizontal, spacing: OverlayView.infoLineSpacing) {
             info
             time
+            if OverlayView.debugBeat {
+                beatReadout
+            }
         }
+    }
+
+    /// 検出した BPM と、刻んだ拍の数(確認用)。
+    private var beatReadout: some View {
+        BeatReadout(spectrum: spectrum, style: style)
     }
 
     @ViewBuilder
@@ -374,7 +389,9 @@ private struct OverlayView: View {
             text: model.current, style: style,
             maxWidth: model.contentWidthLimit,
             alphaAt: progress.map { value in { charAlpha($0, progress: value) } },
-            sinkAt: progress.map { value in { charSink($0, progress: value) } })
+            sinkAt: progress.map { value in { charSink($0, progress: value) } },
+            slack: OverlayView.lyricSlack,
+            dissolve: dissolveAmount(progress: progress))
     }
 
     private func progress(at date: Date) -> Double {
@@ -384,11 +401,19 @@ private struct OverlayView: View {
 
     /// 文字ごとの不透明度。ワイプのときだけ行頭から時間差を付ける。
     private func charAlpha(_ index: Int, progress: Double) -> Double {
+        // ディゾルブは崩れ方で見せるので、文字ごとの濃淡は付けない。
+        if style.transition == .dissolve { return 1 }
         let stagger = style.transition == .wipe ? 0.7 : 0
         let count = max(model.current.count - 1, 1)
         let position = Double(min(index, count)) / Double(count)
         let local = min(max(progress * (1 + stagger) - stagger * position, 0), 1)
         return model.entering ? local : 1 - local
+    }
+
+    /// 崩れ具合。消えるときは崩れていき、現れるときは組み上がる。
+    private func dissolveAmount(progress: Double?) -> Double {
+        guard style.transition == .dissolve, let progress else { return 0 }
+        return model.entering ? 1 - progress : progress
     }
 
     /// 文字ごとの縦の移動量(下が正)。
@@ -418,21 +443,25 @@ private struct OverlayView: View {
         }
     }
 
+
+    /// 歌詞行の上端から、波の中心までの距離。
+    ///
+
+
     /// 波を置く基準。横は揃え設定、縦は歌詞行の上端。
     private var waveAnchor: Alignment {
         Alignment(horizontal: style.alignment.horizontal, vertical: .top)
     }
 
     /// 歌詞行の上端から、波の中心までの距離。
-    ///
     /// 上端を基準にしているので、歌詞が 1 行でも 2 行でも波は動かない。
-    /// 見た目上は「1 行目の中心から waveOffset だけ下」に来るように合わせる。
     private var waveTopOffset: Double {
         let firstLineHalf = style.fontSize * 0.675
         return firstLineHalf + OverlayView.waveOffset - SpectrumWave.height / 2
     }
 
-    /// 余白ぶんの押し戻し量。中央寄せのときは左右対称なのでずれない。
+    /// 波の左右の余白はフレームの内側にある。そのまま端を揃えると描画が
+    /// その余白ぶん内側にずれるので、寄せた向きへ押し戻す。
     private var waveShift: Double {
         switch style.alignment {
         case .left: return -SpectrumWave.margin
@@ -441,14 +470,10 @@ private struct OverlayView: View {
         }
     }
 
-    /// 音の波。歌詞と重ねてよいので、背景として中央に敷く。
+    /// 音の波。
     private var wave: some View {
         SpectrumWave(spectrum: spectrum, style: style)
             .frame(width: SpectrumWave.width + SpectrumWave.margin * 2)
-            // 波の左右の余白はフレームの内側にある。そのまま端を揃えると
-            // 描画がその余白ぶん内側にずれるので、寄せた向きへ押し戻す。
-            // 縦は歌詞と中央を揃えず、明確に下へ置く。
-            // 振幅が大きいときに歌詞と重なるのは構わない。
             .offset(x: waveShift, y: waveTopOffset)
     }
 
@@ -583,6 +608,19 @@ struct StaggeredText: View {
             }
             .offset(y: entering ? rise * (1 - progress) : Self.sink * progress)
         }
+    }
+}
+
+/// 拍の検出状況の表示。確認用なので、体裁は最小限。
+private struct BeatReadout: View {
+    @ObservedObject var spectrum: SpectrumModel
+    @ObservedObject var style: OverlayStyle
+
+    var body: some View {
+        let bpm = spectrum.bpm > 0 ? String(format: "%.0f", spectrum.bpm) : "—"
+        GlyphText(
+            text: "BPM \(bpm)  拍 \(spectrum.beatCount)", style: style,
+            size: OverlayView.infoSize, opacity: 0.7, maxLines: 1)
     }
 }
 

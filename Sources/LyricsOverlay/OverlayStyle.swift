@@ -87,7 +87,7 @@ final class OverlayStyle: ObservableObject {
 
     /// 行が切り替わるときの見せ方。
     enum Transition: String, CaseIterable, Identifiable {
-        case fade, wipe, slide, none
+        case fade, wipe, slide, dissolve, none
 
         var id: String { rawValue }
 
@@ -96,6 +96,7 @@ final class OverlayStyle: ObservableObject {
             case .fade: return "フェード"
             case .wipe: return "左から順に"
             case .slide: return "せり上がり"
+            case .dissolve: return "ディゾルブ"
             case .none: return "なし"
             }
         }
@@ -106,6 +107,7 @@ final class OverlayStyle: ObservableObject {
             case .fade: return (0.22, 0.18)
             case .wipe: return (0.34, 0.28)
             case .slide: return (0.22, 0.20)
+            case .dissolve: return (0.38, 0.32)
             case .none: return (0, 0)
             }
         }
@@ -129,10 +131,11 @@ final class OverlayStyle: ObservableObject {
     /// 縁取りの太さ。
     ///
     /// ストロークはグリフの輪郭を中心に内外へ半分ずつかかり、内側は塗りが覆う。
-    /// つまり外に見える太さは指定値の半分になる。文字サイズの 1/4 を指定して、
-    /// 見た目の縁を文字サイズの 1/8 に揃える。この比率なら、小さな文字でも
-    /// 潰れず、大きな文字でも太くなりすぎない。
-    static func strokeWidth(for size: Double) -> Double { size / 4 }
+    /// つまり外に見える太さは指定値の半分になる。
+    ///
+    /// 文字サイズの 1/4 を指定して、見た目の縁を文字サイズの 1/8 に揃える。
+    /// この比率なら、小さな文字でも潰れず、大きな文字でも太くなりすぎない。
+    nonisolated static func strokeWidth(for size: Double) -> Double { size / 4 }
 
     private let defaults = UserDefaults.standard
 

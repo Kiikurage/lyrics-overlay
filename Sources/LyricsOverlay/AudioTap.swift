@@ -37,6 +37,11 @@ final class AudioTap {
 
     deinit { stop() }
 
+    /// 曲が変わったときに、テンポの推定をやり直す。
+    func resetTempo() {
+        queue.async { [analyzer] in analyzer.resetTempo() }
+    }
+
     // MARK: - 開始と終了
 
     /// - Returns: タップを開始できたか。Spotify が起動していなければ失敗する。

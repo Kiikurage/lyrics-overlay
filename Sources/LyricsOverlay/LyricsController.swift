@@ -13,9 +13,6 @@ final class OverlayModel: ObservableObject {
     @Published var artist: String = ""
     /// 取得状況などの案内。オーバーレイには出さず、メニューにだけ表示する。
     @Published var status: String = "Spotify を待っています"
-    /// 直近で拍を検出した時刻と、推定 BPM(取れていなければ 0)。
-    @Published var beatAt: Date = .distantPast
-    @Published var bpm: Double = 0
     /// 歌詞を折り返す幅。パネルが決めてビューへ渡す。
     @Published var contentWidthLimit: Double = 600
     /// アルバムカバー。取得できるまで、また取得できない曲では nil。
@@ -57,6 +54,14 @@ final class SpectrumModel: ObservableObject {
     @Published var levels: [Double] = []
     /// 残光。levels より長く尾を引く。
     @Published var afterglow: [Double] = []
+    /// 直近の拍の時刻と、推定 BPM(取れていなければ 0)。
+    /// 60fps で更新される側に置く。歌詞のビューを巻き込まないため。
+    @Published var beatAt: Date = .distantPast
+    @Published var bpm: Double = 0
+    /// 拍を刻んだ回数。検出できているかの確認用。
+    @Published var beatCount: Int = 0
+    /// 直近の拍の強さ(0〜1)。
+    @Published var beatStrength: Double = 0
 }
 
 /// 音声を取り込めているかどうかだけを持つ。
@@ -122,8 +127,12 @@ final class LyricsController {
             guard let self else { return }
             spectrum.levels = snapshot.levels
             spectrum.afterglow = snapshot.afterglow
-            if snapshot.beat { model.beatAt = Date() }
-            if snapshot.bpm > 0 { model.bpm = snapshot.bpm }
+            if snapshot.tick {
+                spectrum.beatAt = Date()
+                spectrum.beatStrength = snapshot.tickStrength
+                spectrum.beatCount += 1
+            }
+            if snapshot.bpm > 0, spectrum.bpm != snapshot.bpm { spectrum.bpm = snapshot.bpm }
         }
         guard tap.start() else { return }
         audioTap = tap
@@ -161,6 +170,10 @@ final class LyricsController {
         if state.trackId != currentTrackId {
             currentTrackId = state.trackId
             model.trackInfo = "\(state.title) — \(state.artist)"
+            // テンポと位相は曲ごとに取り直す。
+            audioTap?.resetTempo()
+            spectrum.bpm = 0
+            spectrum.beatCount = 0
             model.title = state.title
             model.artist = state.artist
             model.status = "歌詞を探しています"

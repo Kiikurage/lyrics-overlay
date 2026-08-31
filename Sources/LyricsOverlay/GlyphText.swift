@@ -102,13 +102,15 @@ final class TextLayout {
     ///   - alphaAt: 文字ごとの不透明度。nil なら一律。
     ///   - alignment: 行の長さが違うときに、どちら側で揃えるか。
     ///   - sinkAt: 文字ごとの沈み込み(下方向の移動量)。
+    ///   - slack: 下側に余分に確保してある高さ。文字はそのぶん下へ動ける。
     func draw(
         in context: CGContext, size canvas: CGSize, alignment: NSTextAlignment,
         fill: (Int) -> NSColor, stroke: (Int) -> NSColor, strokeWidth: Double,
-        sinkAt: (Int) -> Double
+        sinkAt: (Int) -> Double, slack: Double
     ) {
         // 縁取りのはみ出しぶんを上下に振り分ける。
-        let inset = (canvas.height - size.height) / 2
+        // 下側の余白(沈み込みのための場所)はここには含めない。
+        let inset = (canvas.height - size.height - slack) / 2
         context.saveGState()
         // Core Text は y 軸が上向き。描画先は下向きなので反転させる。
         context.textMatrix = .identity
@@ -192,12 +194,26 @@ struct GlyphText: View {
     var alphaAt: ((Int) -> Double)?
     /// 文字ごとの沈み込み。消えていく文字を下へ流すのに使う。
     var sinkAt: ((Int) -> Double)?
+    /// 下側に余分に確保する高さ。
+    /// Canvas は枠で切り取るので、沈み込むぶんの場所が無いと文字が見切れる。
+    var slack: Double = 0
+    /// 崩れ具合(0 でそのまま、1 で消滅)。
+    var dissolve: Double = 0
 
     var body: some View {
         let layout = layout()
         let bleed = strokeWidth
         Canvas { context, canvasSize in
             context.withCGContext { cg in
+                if dissolve > 0.001 {
+                    // 文字を格子に切り、順に抜いていく。
+                    // 抜く順番は場所から決めるので、同じ行なら毎回同じ崩れ方になり、
+                    // フレームごとにちらつかない。
+                    let cells = Self.survivingCells(
+                        in: canvasSize, dissolve: dissolve, seed: text.count)
+                    if cells.isEmpty { return }
+                    cg.clip(to: cells)
+                }
                 layout.draw(
                     in: cg, size: canvasSize, alignment: style.alignment.textAlignment,
                     fill: { index in
@@ -218,15 +234,48 @@ struct GlyphText: View {
                         return NSColor(OverlayStyle.strokeColor).withAlphaComponent(CGFloat(alpha))
                     },
                     strokeWidth: bleed,
-                    sinkAt: { sinkAt?($0) ?? 0 })
+                    sinkAt: { sinkAt?($0) ?? 0 },
+                    slack: slack)
             }
         }
         // 縁取りと沈み込みのぶん、描画の余地を足しておく。
-        .frame(width: layout.size.width + bleed, height: layout.size.height + bleed)
+        .frame(width: layout.size.width + bleed, height: layout.size.height + bleed + slack)
     }
 
     private var strokeWidth: Double {
         OverlayStyle.strokeWidth(for: size ?? style.fontSize)
+    }
+
+    /// 崩し残す升目。
+    ///
+    /// 文字を小さな升目に分け、升目ごとに決まった順番で消していく。
+    /// 消える順番は位置から決める(乱数を持ち回らない)ので、同じ行なら
+    /// 毎回同じ崩れ方になり、フレーム間でちらつかない。
+    /// 左からの偏りを少し混ぜて、一様に散るより崩れて見えるようにしている。
+    private static func survivingCells(
+        in size: CGSize, dissolve: Double, seed: Int
+    ) -> [CGRect] {
+        // 升目が粗いと、崩れではなく市松模様に見えてしまう。
+        let cell = 1.5
+        let columns = max(1, Int(ceil(size.width / cell)))
+        let rows = max(1, Int(ceil(size.height / cell)))
+        var rects: [CGRect] = []
+        rects.reserveCapacity(columns * rows / 2)
+
+        for row in 0..<rows {
+            for column in 0..<columns {
+                // 升目が細かいぶん、規則が出ないよう桁を大きめに取る。
+                let hash = Double((column &* 1_103 &+ row &* 2_657 &+ seed &* 7_919) % 9_973)
+                    / 9_973
+                let bias = Double(column) / Double(columns)
+                let threshold = hash * 0.75 + bias * 0.25
+                guard threshold > dissolve else { continue }
+                rects.append(CGRect(
+                    x: Double(column) * cell, y: Double(row) * cell,
+                    width: cell, height: cell))
+            }
+        }
+        return rects
     }
 
     private func layout() -> TextLayout {
@@ -249,11 +298,12 @@ struct GlyphText: View {
     /// パネルが寸法を測るときにも同じ組版を使う。
     static func size(
         of text: String, style: OverlayStyle, size: Double? = nil,
-        maxLines: Int = 2, maxWidth: Double = .greatestFiniteMagnitude
+        maxLines: Int = 2, maxWidth: Double = .greatestFiniteMagnitude, slack: Double = 0
     ) -> CGSize {
         let layout = TextLayout.make(
             text: text, font: style.font(size: size), maxWidth: maxWidth, maxLines: maxLines)
         let bleed = OverlayStyle.strokeWidth(for: size ?? style.fontSize)
-        return CGSize(width: layout.size.width + bleed, height: layout.size.height + bleed)
+        return CGSize(
+            width: layout.size.width + bleed, height: layout.size.height + bleed + slack)
     }
 }
